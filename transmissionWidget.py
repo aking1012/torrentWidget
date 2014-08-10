@@ -2,7 +2,7 @@
 
 #UI stuff
 import cairo
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk, Gdk, GLib, Wnck
 from gi.repository import AppIndicator3 as appindicator
 
 #Connector for the transmissionrpc service
@@ -97,6 +97,7 @@ class MyConfigWin(Gtk.Window):
     super().__init__()
     self.app = root
     self.set_title(self.app.name + ' Config Window')
+    self.set_position(Gtk.WindowPosition.CENTER)    
     grid = Gtk.Grid()
     spacer_a = Gtk.Box()
     spacer_b = Gtk.Box()
@@ -106,15 +107,24 @@ class MyConfigWin(Gtk.Window):
     grid.attach(spacer_b, 2, 1, 1, 1)
 
     grid.attach(Gtk.Label(label='Transparency'), 1, 2, 1, 1)
-    grid.attach(Gtk.Scale(orientation='horizontal'), 2, 2, 1, 1)
+    scale = Gtk.HScale.new_with_range(min=0, max=100, step=1)
+    scale.set_value(self.app.config.opacity*100)
+    scale.connect("value-changed", self.set_opacity)
+    grid.attach(scale, 2, 2, 1, 1)
     grid.attach(Gtk.Label(label='Background Color'), 1, 3, 1, 1)
     grid.attach(Gtk.ColorButton(), 2, 3, 1, 1)
     grid.attach(Gtk.Label(label='Foreground Color'), 1, 4, 1, 1)
     grid.attach(Gtk.ColorButton(), 2, 4, 1, 1)
-    grid.attach(Gtk.Label(label='Always above'), 1, 5, 1, 1)
-    grid.attach(Gtk.Switch(), 2, 5, 1, 1)
+    grid.attach(Gtk.Label(label='Always below'), 1, 5, 1, 1)
+    below = Gtk.Switch()
+    below.set_active(self.app.config.below)
+    below.connect("notify::active", self.set_below)
+    grid.attach(below, 2, 5, 1, 1)
     grid.attach(Gtk.Label(label='Show on all workspaces'), 1, 6, 1, 1)
-    grid.attach(Gtk.Switch(), 2, 6, 1, 1)
+    sticky = Gtk.Switch()
+    sticky.set_active(self.app.config.stick)
+    sticky.connect("notify::active", self.set_sticky)
+    grid.attach(sticky, 2, 6, 1, 1)
     grid.attach(Gtk.Label(label='Width'), 1, 7, 1, 1)
     grid.attach(Gtk.Entry(), 2, 7, 1, 1)
     grid.attach(Gtk.Label(label='Characters'), 1, 8, 1, 1)
@@ -130,6 +140,16 @@ class MyConfigWin(Gtk.Window):
     self.show_all()
     self.hide()
     self.connect('delete-event', self.cb_show)
+  def set_opacity(self, w):
+    self.app.config.opacity = w.get_value()/100
+    self.app.main_win.queue_draw()
+  def set_below(self, w, data):
+    self.app.config.below = w.get_active()
+    self.app.main_win.set_below()
+  def set_sticky(self, w, data):
+    self.app.config.stick = w.get_active()
+    self.app.main_win.set_sticky()
+
 
   def cb_show(self, w, data=''):
     if self.get_visible():
@@ -145,7 +165,8 @@ class MyMainWin(Gtk.Window):
     self.set_decorated(False)
     self.set_title(self.app.name)
     self.set_skip_taskbar_hint(True)
-    self.set_keep_below(True)
+    self.set_below()
+    self.set_sticky()
     #Should probably make this a scrollable and the window not resizable...
     self.root_box = Gtk.VBox()
     self.root_box.pack_start(self.app.worker.box, False, 0, 0)
@@ -157,16 +178,32 @@ class MyMainWin(Gtk.Window):
     self.set_app_paintable(True)
     self.connect("draw", self.area_draw)
     screen = self.get_screen()
-    self.set_size_request(200, Gdk.Screen.height())
-    self.move(Gdk.Screen.width() - 200, 0)
+    self.set_size_request(200, Gdk.Screen.height()-20)
+    self.move(Gdk.Screen.width() - 200, 20)
     self.show_all()
+    self.hide()
     self.connect('delete-event', self.cb_show)
 
   def area_draw(self, widget, cr):
-    cr.set_source_rgba(.2, .2, .2, 0.2)
+    cr.set_source_rgba(.2, .2, .2, self.app.config.opacity)
     cr.set_operator(cairo.OPERATOR_SOURCE)
     cr.paint()
     cr.set_operator(cairo.OPERATOR_OVER)
+
+  def set_below(self):
+    if self.app.config.below:
+      self.set_keep_above(False)
+      self.set_keep_below(True)
+    else:
+      self.set_keep_below(False)
+      self.set_keep_above(True)
+    self.queue_draw()
+  def set_sticky(self):
+    if self.app.config.stick:
+      self.stick()
+    else:
+      self.unstick()
+    self.queue_draw()
 
   def cb_show(self, w, data=''):
     if self.get_visible():
@@ -194,6 +231,9 @@ class MyConfig:
     toggle that behavior on or off "hands-off mode"
     '''
     self.app = root
+    self.opacity = 0.2
+    self.below = True
+    self.stick = True
     with open(os.path.join(os.getenv('HOME'), '.config/transmission/settings.json')) as settings_file:
       self.config_params = json.loads(settings_file.read())
     self.config_params["rpc-authentication-required"] = False
