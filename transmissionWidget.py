@@ -13,21 +13,12 @@ import subprocess, psutil, signal, os, json, cgi
 
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-'''
-#TODO
-config win UI
-  ?hands-off list
-  toggle in order
-  set max-file
-'''
-
 class EnvCheck:
   '''
   Make sure everything we need is in place
   '''
   def __init__(self, root):
     self.app = root
-    self.daemon_installed = self.__is_transmission_gtk_installed()
     self.try_connect()
 
   def try_connect(self):
@@ -43,9 +34,6 @@ class EnvCheck:
         outs, errs = proc.communicate()
       except:
         pass
-
-  def __is_transmission_gtk_installed(self):
-    return subprocess.check_output(["which", "transmission-gtk"])
 
   def __is_running(self):
     for proc in psutil.process_iter():
@@ -64,12 +52,9 @@ class EnvCheck:
       self.app.transmission_proc = subprocess.Popen(['transmission-gtk','--minimized'])
       self.__is_running()
     try:
-      print("Trying to connect...")      
-      print(self.app.config.config_params['rpc-port'])
       self.app.tc = transmissionrpc.Client('localhost', port=int(self.app.config.config_params['rpc-port']))
       return True
     except:
-      print("Failed to connect...")      
       return False
 
 class MyIndicator:
@@ -112,12 +97,46 @@ class MyConfigWin(Gtk.Window):
     super().__init__()
     self.app = root
     self.set_title(self.app.name + ' Config Window')
+    grid = Gtk.Grid()
+    spacer_a = Gtk.Box()
+    spacer_b = Gtk.Box()
+    spacer_a.set_size_request(400, 1)
+    spacer_b.set_size_request(400, 1)
+    grid.attach(spacer_a, 1, 1, 1, 1)
+    grid.attach(spacer_b, 2, 1, 1, 1)
 
-  def cb_show(self, w, data):
+    grid.attach(Gtk.Label(label='Transparency'), 1, 2, 1, 1)
+    grid.attach(Gtk.Scale(orientation='horizontal'), 2, 2, 1, 1)
+    grid.attach(Gtk.Label(label='Background Color'), 1, 3, 1, 1)
+    grid.attach(Gtk.ColorButton(), 2, 3, 1, 1)
+    grid.attach(Gtk.Label(label='Foreground Color'), 1, 4, 1, 1)
+    grid.attach(Gtk.ColorButton(), 2, 4, 1, 1)
+    grid.attach(Gtk.Label(label='Always above'), 1, 5, 1, 1)
+    grid.attach(Gtk.Switch(), 2, 5, 1, 1)
+    grid.attach(Gtk.Label(label='Show on all workspaces'), 1, 6, 1, 1)
+    grid.attach(Gtk.Switch(), 2, 6, 1, 1)
+    grid.attach(Gtk.Label(label='Width'), 1, 7, 1, 1)
+    grid.attach(Gtk.Entry(), 2, 7, 1, 1)
+    grid.attach(Gtk.Label(label='Characters'), 1, 8, 1, 1)
+    grid.attach(Gtk.Entry(), 2, 8, 1, 1)
+    grid.attach(Gtk.Button(label='Apply'), 1, 9, 1, 1)
+    grid.attach(Gtk.Button(label='Dismiss'), 2, 9, 1, 1)
+
+
+    grid.set_row_homogeneous(True)
+    grid.set_column_homogeneous(True)
+
+    self.add(grid)
+    self.show_all()
+    self.hide()
+    self.connect('delete-event', self.cb_show)
+
+  def cb_show(self, w, data=''):
     if self.get_visible():
       self.hide()
     else:
       self.show()
+    return True
 
 class MyMainWin(Gtk.Window):
   def __init__(self, root):
@@ -127,6 +146,7 @@ class MyMainWin(Gtk.Window):
     self.set_title(self.app.name)
     self.set_skip_taskbar_hint(True)
     self.set_keep_below(True)
+    #Should probably make this a scrollable and the window not resizable...
     self.root_box = Gtk.VBox()
     self.root_box.pack_start(self.app.worker.box, False, 0, 0)
     self.add(self.root_box)
@@ -140,6 +160,7 @@ class MyMainWin(Gtk.Window):
     self.set_size_request(200, Gdk.Screen.height())
     self.move(Gdk.Screen.width() - 200, 0)
     self.show_all()
+    self.connect('delete-event', self.cb_show)
 
   def area_draw(self, widget, cr):
     cr.set_source_rgba(.2, .2, .2, 0.2)
@@ -147,14 +168,31 @@ class MyMainWin(Gtk.Window):
     cr.paint()
     cr.set_operator(cairo.OPERATOR_OVER)
 
-  def cb_show(self, w, data):
+  def cb_show(self, w, data=''):
     if self.get_visible():
       self.hide()
     else:
       self.show_all()
+    return True
+
+
 
 class MyConfig:
   def __init__(self, root):
+    '''
+    options to expose:
+    UI
+    transparency
+    bg-color
+    text-color
+    ?position(left or right)
+    always on top/always on bottom
+    on all workspaces
+
+    Activity:
+    number of files per torrent to give high priority and set the rest to low
+    toggle that behavior on or off "hands-off mode"
+    '''
     self.app = root
     with open(os.path.join(os.getenv('HOME'), '.config/transmission/settings.json')) as settings_file:
       self.config_params = json.loads(settings_file.read())
@@ -167,6 +205,8 @@ class MyConfig:
     self.config_params["rpc-whitelist"] = "127.0.0.1"
     self.config_params["rpc-whitelist-enabled"] = True
     self.write()
+
+
 
   def write(self):
     with open(os.path.join(os.getenv('HOME'), '.config/transmission/settings.json'), 'w') as settings_file:
