@@ -2,7 +2,7 @@
 
 #UI stuff
 import cairo
-from gi.repository import Gtk, Gdk, GLib, Wnck
+from gi.repository import Gtk, Gdk, GLib
 from gi.repository import AppIndicator3 as appindicator
 
 #Connector for the transmissionrpc service
@@ -93,12 +93,15 @@ class MyIndicator:
     Gtk.main_quit()
 
 class MyConfigWin(Gtk.Window):
+  #Needs to be prettified
   def __init__(self, root):
     super().__init__()
     self.app = root
     self.set_title(self.app.name + ' Config Window')
     self.set_position(Gtk.WindowPosition.CENTER)    
+
     grid = Gtk.Grid()
+    #There's a better way to do this it's just temporary kludge
     spacer_a = Gtk.Box()
     spacer_b = Gtk.Box()
     spacer_a.set_size_request(400, 1)
@@ -111,35 +114,50 @@ class MyConfigWin(Gtk.Window):
     scale.set_value(self.app.config.opacity*100)
     scale.connect("value-changed", self.set_opacity)
     grid.attach(scale, 2, 2, 1, 1)
+
     grid.attach(Gtk.Label(label='Background Color'), 1, 3, 1, 1)
-    grid.attach(Gtk.ColorButton(), 2, 3, 1, 1)
+    bgcol = Gtk.ColorButton.new_with_color(self.color_cairo_to_gdk(self.app.config.rb, self.app.config.gb, self.app.config.bb))
+    bgcol.connect("color-set", self.set_bg_col)
+    grid.attach(bgcol, 2, 3, 1, 1)
+
     grid.attach(Gtk.Label(label='Foreground Color'), 1, 4, 1, 1)
-    grid.attach(Gtk.ColorButton(), 2, 4, 1, 1)
+    #Move this to a method
+    col_nums = []    
+    n=2
+    line = self.app.config.fg_col.lstrip('#')
+    for item in [line[i:i+n] for i in range(0, len(line), n)]:
+      col_nums.append(int(item, 16)*257)
+    #End move this
+    fgcol = Gtk.ColorButton.new_with_color(Gdk.Color(col_nums[0],col_nums[1],col_nums[2]))
+    fgcol.connect("color-set", self.set_fg_col)
+    grid.attach(fgcol, 2, 4, 1, 1)
+
     grid.attach(Gtk.Label(label='Always below'), 1, 5, 1, 1)
     below = Gtk.Switch()
     below.set_active(self.app.config.below)
     below.connect("notify::active", self.set_below)
     grid.attach(below, 2, 5, 1, 1)
+
     grid.attach(Gtk.Label(label='Show on all workspaces'), 1, 6, 1, 1)
     sticky = Gtk.Switch()
     sticky.set_active(self.app.config.stick)
     sticky.connect("notify::active", self.set_sticky)
     grid.attach(sticky, 2, 6, 1, 1)
-    grid.attach(Gtk.Label(label='Width'), 1, 7, 1, 1)
-    grid.attach(Gtk.Entry(), 2, 7, 1, 1)
-    grid.attach(Gtk.Label(label='Characters'), 1, 8, 1, 1)
-    grid.attach(Gtk.Entry(), 2, 8, 1, 1)
-    grid.attach(Gtk.Button(label='Apply'), 1, 9, 1, 1)
-    grid.attach(Gtk.Button(label='Dismiss'), 2, 9, 1, 1)
 
+    grid.attach(Gtk.Label(label='Sequential downloads'), 1, 7, 1, 1)
+    sequential = Gtk.Switch()
+    sequential.set_active(self.app.config.sequential)
+    sequential.connect("notify::active", self.set_sequential)
+    grid.attach(sequential, 2, 7, 1, 1)
 
     grid.set_row_homogeneous(True)
     grid.set_column_homogeneous(True)
 
     self.add(grid)
-    self.show_all()
-    self.hide()
+    grid.show_all()
     self.connect('delete-event', self.cb_show)
+  def set_sequential(self, w, data):
+    self.app.config.sequential = w.get_active()
   def set_opacity(self, w):
     self.app.config.opacity = w.get_value()/100
     self.app.main_win.queue_draw()
@@ -150,6 +168,24 @@ class MyConfigWin(Gtk.Window):
     self.app.config.stick = w.get_active()
     self.app.main_win.set_sticky()
 
+  #Cherry picked these out of pygtk graphing module
+  def color_cairo_to_gdk(self, r, g, b):
+    return Gdk.Color(int(65535 * r), int(65535 * g), int(65535 * b)) 
+  def color_gdk_to_cairo(self, color): 
+    return (color.red / 65535.0, color.green / 65535.0, color.blue / 65535.0) 
+
+  def set_bg_col(self, w):
+    self.app.config.rb, self.app.config.gb, self.app.config.bb = self.color_gdk_to_cairo(w.get_color())
+    self.app.main_win.queue_draw()
+
+  def color_gdk_to_markup(self, color):
+    temp = []
+    for item in (color.red, color.green, color.blue):
+      temp.append(hex(int(item/257)).split('x')[1].zfill(2))
+    return '#' + ''.join(temp)
+  def set_fg_col(self, w):
+    self.app.config.fg_col = self.color_gdk_to_markup(w.get_color())
+    self.app.worker.get_torrents()
 
   def cb_show(self, w, data=''):
     if self.get_visible():
@@ -178,14 +214,14 @@ class MyMainWin(Gtk.Window):
     self.set_app_paintable(True)
     self.connect("draw", self.area_draw)
     screen = self.get_screen()
-    self.set_size_request(200, Gdk.Screen.height()-20)
-    self.move(Gdk.Screen.width() - 200, 20)
+    self.set_size_request(200, Gdk.Screen.height()-25)
+    self.move(Gdk.Screen.width() - 200, 25)
     self.show_all()
     self.hide()
     self.connect('delete-event', self.cb_show)
 
   def area_draw(self, widget, cr):
-    cr.set_source_rgba(.2, .2, .2, self.app.config.opacity)
+    cr.set_source_rgba(self.app.config.rb, self.app.config.gb, self.app.config.bb, self.app.config.opacity)
     cr.set_operator(cairo.OPERATOR_SOURCE)
     cr.paint()
     cr.set_operator(cairo.OPERATOR_OVER)
@@ -218,13 +254,7 @@ class MyConfig:
   def __init__(self, root):
     '''
     options to expose:
-    UI
-    transparency
-    bg-color
-    text-color
-    ?position(left or right)
-    always on top/always on bottom
-    on all workspaces
+    ?position(left or right/top spacing)
 
     Activity:
     number of files per torrent to give high priority and set the rest to low
@@ -232,8 +262,13 @@ class MyConfig:
     '''
     self.app = root
     self.opacity = 0.2
+    self.rb = .2
+    self.gb = .2
+    self.bb = .2
+    self.fg_col = '#FFFFFF'
     self.below = True
     self.stick = True
+    self.sequential = False
     with open(os.path.join(os.getenv('HOME'), '.config/transmission/settings.json')) as settings_file:
       self.config_params = json.loads(settings_file.read())
     self.config_params["rpc-authentication-required"] = False
@@ -258,33 +293,54 @@ class MyWorker:
     self.app = root
     self.box = Gtk.VBox()
 
+  def is_sequential(self, torrents):
+    if self.app.config.sequential:
+      print("Trying sequential")
+      for torrent in torrents:
+        if torrent.status == 'downloading':
+          low = []
+          torrent_files = torrent.files()
+          for item in torrent_files:
+            low.append(item)
+          high = []
+          for item in sorted(torrent_files, key=lambda x: torrent_files[x]['name']):
+            if torrent_files[item]['size'] - torrent_files[item]['completed'] > 0:
+              high.append(item)
+              break
+          try:
+            low.pop(low.index(high[0]))
+            self.app.tc.change(torrent.id, priority_high=high, priority_low=low)
+          except:
+            self.app.tc.change(torrent.id, priority_low=low)
+
   def get_torrents(self):
     box = Gtk.VBox()
     try:
       torrents = self.app.tc.get_torrents()
+      self.is_sequential(torrents)
+      print("Trying screen")
       for torrent in torrents:
         item_box = Gtk.VBox()
         label = Gtk.Label()
-
         if len(torrent.name) > 20:
           name = torrent.name[:20]
         else:
           name = torrent.name
         t = cgi.escape(name)
-        label.set_markup ("<span fgcolor='white'>{0}</span>".format(t))
+        label.set_markup ("<span fgcolor='{0}'>{1}</span>".format(self.app.config.fg_col,t))
         item_box.pack_start(label, False, 0 ,0)
         label = Gtk.Label()
         completed = str(torrent.percentDone * 100)
         if len(completed) > 18:
           completed = completed[:18] + ' %'
         t = cgi.escape(completed)
-        label.set_markup ("<span fgcolor='white'>{0}</span>".format(t))
+        label.set_markup ("<span fgcolor='{0}'>{1}</span>".format(self.app.config.fg_col,t))
         item_box.pack_start(label, False, 0 ,0)
         box.pack_start(item_box, False, 0, 0)
       self.app.main_win.root_box.remove(self.box)
       self.box = box
       self.app.main_win.root_box.pack_start(self.box, False, 0, 0)
-      self.app.main_win.root_box.show_all()    
+      self.app.main_win.root_box.show_all()
     except:
       self.app.env_check.try_connect()
 
